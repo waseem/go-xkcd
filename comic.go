@@ -1,12 +1,11 @@
 // xkcd: downloads json of a comic given its number and stores it under index/
 // if it cannot find it under index/
-package main
+package xkcd
 
 import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -29,17 +28,16 @@ const (
 )
 
 func GetComic(comicNumber string) (*Comic, error) {
-	if _, err := strconv.Atoi(comicNumber); err != nil {
-		fmt.Fprintf(os.Stderr, "comic number cannot be 0")
+	comicNumberInt, err := strconv.Atoi(comicNumber)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "comic number must be an integer")
 		os.Exit(1)
 	}
-	indexDir, err := os.Getwd()
+
+	filePath, err := prepareFilePath(uint(comicNumberInt))
 	if err != nil {
 		return nil, err
 	}
-
-	fileName := comicNumber + ".json"
-	filePath := indexDir + "/index/" + fileName
 
 	var comic Comic
 
@@ -54,35 +52,26 @@ func GetComic(comicNumber string) (*Comic, error) {
 		}
 
 	} else {
-		var err error
-		response, err := http.Get(baseUrl + comicNumber + "/info.0.json")
-		if err != nil {
-			return nil, err
-		}
-		if response.StatusCode != http.StatusOK {
-			response.Body.Close()
-			return nil, fmt.Errorf("fetching comic %s failed", comicNumber)
-		}
 
-		bodyBytes, err := ioutil.ReadAll(response.Body)
+		comicJson, err := requestComicJson(comicNumber)
 		if err != nil {
-			response.Body.Close()
-			return nil, err
-		}
-		response.Body.Close()
-
-		file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0660)
-		if err != nil {
-			return nil, err
-		}
-		_, err = file.Write(bodyBytes)
-		if err != nil {
-			file.Close()
 			return nil, err
 		}
 
-		if err = json.Unmarshal(bodyBytes, &comic); err != nil {
+		if err = json.Unmarshal(comicJson, &comic); err != nil {
 			return nil, err
+		}
+
+		filePath, err = prepareFilePath(comic.Num)
+		if err != nil {
+			return nil, err
+		}
+
+		if !fileExists(filePath) {
+			// in case of requesting 0th(current comic), the json file may or may not exist on disk
+			if err = writeComicJson(filePath, comicJson); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -96,20 +85,53 @@ func fileExists(filePath string) bool {
 	return true
 }
 
-func main() {
-	comic, err := GetComic(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
+func prepareUrl(comicNumber string) string {
+	if comicNumber == "0" {
+		return baseUrl + "/info.0.json"
 	}
 
-	fmt.Printf("Comic: %d\n", comic.Num)
-	fmt.Printf("+----------+\n\n")
-	fmt.Printf("Title: %s\n", comic.Title)
-	fmt.Printf("Safe Title: %s\n", comic.SafeTitle)
-	fmt.Printf("Transcript: %s\n", comic.Transcript)
-	fmt.Printf("Alt: %s\n", comic.Alt)
-	fmt.Printf("Image: %s\n", comic.Img)
-	fmt.Printf("Link: %s\n", comic.Link)
-	fmt.Printf("Date: %s-%s-%s\n", comic.Year, comic.Month, comic.Day)
-	fmt.Printf("News: %s\n", comic.News)
+	return baseUrl + comicNumber + "/info.0.json"
+}
+
+func requestComicJson(comicNumber string) ([]byte, error) {
+	response, err := http.Get(prepareUrl(comicNumber))
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		return nil, fmt.Errorf("fetching comic %s failed", comicNumber)
+	}
+
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		response.Body.Close()
+		return nil, err
+	}
+
+	response.Body.Close()
+	return bodyBytes, nil
+}
+
+func prepareFilePath(comicNumber uint) (string, error) {
+	currentDirectory, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	fileName := strconv.Itoa(int(comicNumber)) + ".json"
+	return currentDirectory + "/index/" + fileName, nil
+}
+
+func writeComicJson(filePath string, comicJson []byte) error {
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0660)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(comicJson)
+	if err != nil {
+		file.Close()
+		return err
+	}
+	return nil
 }
