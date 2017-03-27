@@ -98,19 +98,17 @@ func requestComicJson(comicNumber string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		response.Body.Close()
 		return nil, fmt.Errorf("fetching comic %s failed", comicNumber)
 	}
 
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		response.Body.Close()
 		return nil, err
 	}
 
-	response.Body.Close()
 	return bodyBytes, nil
 }
 
